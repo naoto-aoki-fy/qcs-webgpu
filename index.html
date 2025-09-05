@@ -17,6 +17,12 @@
     <label>量子ビット数 <code>num_qubits</code>：
       <input id="numQubits" type="number" min="1" value="3">
     </label>
+    <label>精度:
+      <select id="precision">
+        <option value="fp32">FP32</option>
+        <option value="fp64">FP64</option>
+      </select>
+    </label>
     <button id="runBtn">実行</button>
   </div>
   <div id="summary"></div>
@@ -28,11 +34,14 @@ const UBO_SIZE = 256; // UBO は 256B アライン
 
 window.addEventListener("error", (e)=>console.error("Window error:", e.error || e.message));
 
-async function main(numQubits) {
+async function main(numQubits, precision) {
   const out = document.getElementById("output");
   const summary = document.getElementById("summary");
   out.textContent = "";
   summary.textContent = "";
+
+  const is64 = (precision === "fp64");
+  const floatArray = is64 ? Float64Array : Float32Array;
 
   if (!navigator.gpu) {
     out.textContent = "このブラウザは WebGPU をサポートしていません。Chrome/Edge 125+ などでお試しください。";
@@ -41,7 +50,11 @@ async function main(numQubits) {
 
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) { out.textContent = "GPU adapter を取得できませんでした。"; return; }
-  const device  = await adapter.requestDevice();
+  if (is64 && !adapter.features.has("shader-f64")) {
+    out.textContent = "このデバイスは fp64 をサポートしていません。";
+    return;
+  }
+  const device  = await adapter.requestDevice(is64 ? { requiredFeatures: ["shader-f64"] } : {});
   device.onuncapturederror = (e)=>console.error("Uncaptured GPU error:", e.error);
 
   console.groupCollapsed("🔧 Device Info");
@@ -51,7 +64,7 @@ async function main(numQubits) {
   console.groupEnd();
 
   const Nstates = 2 ** numQubits;
-  const bytesPerAmp = 8; // complex64
+  const bytesPerAmp = is64 ? 16 : 8; // complex128 or complex64
   const stateBytes  = Nstates * bytesPerAmp;
 
   const maxBindBytes = device.limits.maxStorageBufferBindingSize ?? (128 * 1024 * 1024);
@@ -74,14 +87,14 @@ async function main(numQubits) {
   console.groupEnd();
 
   // --- 状態ベクトル（ping-pong） ---
-  const initHost = new Float32Array(Nstates * 2);
+  const initHost = new floatArray(Nstates * 2);
   initHost[0] = 1.0;
 
   const stateA = device.createBuffer({
     size: stateBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
     mappedAtCreation: true
   });
-  new Float32Array(stateA.getMappedRange()).set(initHost);
+  new floatArray(stateA.getMappedRange()).set(initHost);
   stateA.unmap();
 
   const stateB = device.createBuffer({
@@ -92,27 +105,31 @@ async function main(numQubits) {
     size: stateBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
   });
 
-  // --- WGSL（FIX: 構造体フィールドはカンマ区切り） ---
+    // --- WGSL（FP32/FP64 切り替え対応） ---
+  const scalar = is64 ? "f64" : "f32";
+  const complexField = is64 ? `vec2<${scalar}>` : `vec4<${scalar}>`;
+  const access = is64 ? "" : ".xy";
+
   const singleQubitWGSL = /* wgsl */`
 struct GateU {
   stride : u32,   // 2^target
   npairs : u32,   // N/2
   _pad0  : u32,
   _pad1  : u32,
-  a : vec4<f32>,  // [re, im, 0, 0]
-  b : vec4<f32>,
-  c : vec4<f32>,
-  d : vec4<f32>,
+  a : ${complexField},${is64 ? "" : "  // [re, im, 0, 0]"}
+  b : ${complexField},
+  c : ${complexField},
+  d : ${complexField},
 };
 
-struct Buf { data: array<f32>, };
+struct Buf { data: array<${scalar}>, };
 
 @group(0) @binding(0) var<storage, read>       stateIn  : Buf;
 @group(0) @binding(1) var<storage, read_write> stateOut : Buf;
 @group(0) @binding(2) var<uniform>             U       : GateU;
 
-fn cmul(x: vec2<f32>, y: vec2<f32>) -> vec2<f32> {
-  return vec2<f32>(x.x*y.x - x.y*y.y, x.x*y.y + x.y*x.x);
+fn cmul(x: vec2<${scalar}>, y: vec2<${scalar}>) -> vec2<${scalar}> {
+  return vec2<${scalar}>(x.x*y.x - x.y*y.y, x.x*y.y + x.y*x.x);
 }
 
 @compute @workgroup_size(${WG_SIZE})
@@ -128,13 +145,13 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let f0 = i0 * 2u;
   let f1 = i1 * 2u;
 
-  let v0 = vec2<f32>(stateIn.data[f0],    stateIn.data[f0+1u]);
-  let v1 = vec2<f32>(stateIn.data[f1],    stateIn.data[f1+1u]);
+  let v0 = vec2<${scalar}>(stateIn.data[f0],    stateIn.data[f0+1u]);
+  let v1 = vec2<${scalar}>(stateIn.data[f1],    stateIn.data[f1+1u]);
 
-  let a = U.a.xy;
-  let b = U.b.xy;
-  let c = U.c.xy;
-  let d = U.d.xy;
+  let a = U.a${access};
+  let b = U.b${access};
+  let c = U.c${access};
+  let d = U.d${access};
 
   let o0 = cmul(a, v0) + cmul(b, v1);
   let o1 = cmul(c, v0) + cmul(d, v1);
@@ -143,7 +160,6 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   stateOut.data[f0+1u] = o0.y;
   stateOut.data[f1]    = o1.x;
   stateOut.data[f1+1u] = o1.y;
-}
 `;
 
   const cnotWGSL = /* wgsl */`
@@ -154,7 +170,7 @@ struct CNOTU {
   _pad        : u32,
 };
 
-struct Buf { data: array<f32>, };
+struct Buf { data: array<${scalar}>, };
 
 @group(0) @binding(0) var<storage, read>       stateIn  : Buf;
 @group(0) @binding(1) var<storage, read_write> stateOut : Buf;
@@ -186,10 +202,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     stateOut.data[f1]    = stateIn.data[f1];
     stateOut.data[f1+1u] = stateIn.data[f1+1u];
   }
-}
 `;
-
-  const singlePipe = device.createComputePipeline({
+const singlePipe = device.createComputePipeline({
     layout: "auto", compute: { module: device.createShaderModule({ code: singleQubitWGSL }), entryPoint: "main" }
   });
   const cnotPipe = device.createComputePipeline({
@@ -209,7 +223,6 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   function buildSingleUBOData(target, N, mat) {
     const buf = new ArrayBuffer(UBO_SIZE);
     const dv  = new DataView(buf);
-    const f32 = new Float32Array(buf);
     const stride = 1 << target;
     const npairs = N >>> 1;
 
@@ -218,12 +231,22 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     dv.setUint32(8,  0, true);
     dv.setUint32(12, 0, true);
 
-    let base = 16 / 4; // float index
-    // a,b,c,d（xy に re,im / zw=0）
-    f32[base+0]  = mat.a[0]; f32[base+1]  = mat.a[1];
-    f32[base+4]  = mat.b[0]; f32[base+5]  = mat.b[1];
-    f32[base+8]  = mat.c[0]; f32[base+9]  = mat.c[1];
-    f32[base+12] = mat.d[0]; f32[base+13] = mat.d[1];
+    if (is64) {
+      const f64 = new Float64Array(buf);
+      let base = 16 / 8;
+      f64[base+0] = mat.a[0]; f64[base+1] = mat.a[1];
+      f64[base+2] = mat.b[0]; f64[base+3] = mat.b[1];
+      f64[base+4] = mat.c[0]; f64[base+5] = mat.c[1];
+      f64[base+6] = mat.d[0]; f64[base+7] = mat.d[1];
+    } else {
+      const f32 = new Float32Array(buf);
+      let base = 16 / 4; // float index
+      // a,b,c,d（xy に re,im / zw=0）
+      f32[base+0]  = mat.a[0]; f32[base+1]  = mat.a[1];
+      f32[base+4]  = mat.b[0]; f32[base+5]  = mat.b[1];
+      f32[base+8]  = mat.c[0]; f32[base+9]  = mat.c[1];
+      f32[base+12] = mat.d[0]; f32[base+13] = mat.d[1];
+    }
 
     return { buf, stride, npairs };
   }
@@ -251,7 +274,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     await device.queue.onSubmittedWorkDone();
 
     await readback.mapAsync(GPUMapMode.READ);
-    const arr = new Float32Array(readback.getMappedRange()).slice();
+    const arr = new floatArray(readback.getMappedRange()).slice();
     readback.unmap();
 
     let norm = 0, nonzero = 0;
@@ -383,7 +406,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   device.queue.submit([encFinal.finish()]);
   await device.queue.onSubmittedWorkDone();
   await readback.mapAsync(GPUMapMode.READ);
-  const result = new Float32Array(readback.getMappedRange()).slice();
+  const result = new floatArray(readback.getMappedRange()).slice();
   readback.unmap();
 
   let norm = 0;
@@ -431,7 +454,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
 /* UI */
 document.getElementById("runBtn").addEventListener("click", async () => {
   const n = parseInt(document.getElementById("numQubits").value, 10);
-  await main(n);
+  const precision = document.getElementById("precision").value;
+  await main(n, precision);
 });
 
 // ★ 自動実行をやめる（以下の行を削除）
