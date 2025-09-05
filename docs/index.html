@@ -5,11 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title id="pageTitle">WebGPU Quantum Simulator</title>
   <style>
-    body { font-family: system-ui, sans-serif; line-height: 1.5; padding: 16px; }
-    .row { margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    input[type="number"] { width: 6em; }
-    pre { background: #f7f7f7; padding: 12px; border-radius: 6px; overflow-x: auto; }
-    .muted { color:#666; }
+    body {
+      font-family: system-ui, sans-serif;
+      line-height: 1.5;
+      padding: 16px;
+      background: #000;
+      color: #fff;
+    }
+    .row {
+      margin-bottom: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    input[type="number"], select, button {
+      background: #222;
+      color: #fff;
+      border: 1px solid #555;
+    }
+    pre {
+      background: #111;
+      color: #fff;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+    canvas { background: #000; }
+    .muted { color:#aaa; }
     @media (max-width: 600px) {
       body { padding: 12px; }
       .row { flex-direction: column; align-items: stretch; }
@@ -98,19 +121,38 @@
 
   let runtimeChart;
 
-  function initChart(t) {
-    const ctx = document.getElementById('runtimeChart');
-    runtimeChart = new Chart(ctx, {
-      type: 'scatter',
-      data: { datasets: [{ label: 'Runtime', data: [] }] },
-      options: {
-        scales: {
-          x: { title: { display: true, text: t.chartXLabel }, type: 'linear' },
-          y: { title: { display: true, text: t.chartYLabel } }
+    function initChart(t) {
+      const ctx = document.getElementById('runtimeChart');
+      runtimeChart = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+          datasets: [{
+            label: 'Runtime',
+            data: [],
+            borderColor: '#0ff',
+            backgroundColor: '#0ff'
+          }]
+        },
+        options: {
+          scales: {
+            x: {
+              title: { display: true, text: t.chartXLabel, color: '#fff' },
+              type: 'linear',
+              ticks: { color: '#fff' },
+              grid: { color: '#444' }
+            },
+            y: {
+              title: { display: true, text: t.chartYLabel, color: '#fff' },
+              ticks: { color: '#fff' },
+              grid: { color: '#444' }
+            }
+          },
+          plugins: {
+            legend: { labels: { color: '#fff' } }
+          }
         }
-      }
-    });
-  }
+      });
+    }
 
   function addDataPoint(numQubits, timeMs) {
     if (!runtimeChart) return;
