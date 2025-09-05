@@ -24,12 +24,11 @@
       <label id="numLabel" for="numQubits"></label>
       <input id="numQubits" type="number" min="1" value="3">
     </label>
-    <label>精度:
-      <select id="precision">
-        <option value="fp32">FP32</option>
-        <option value="fp64">FP64</option>
-      </select>
-    </label>
+    <label id="precisionLabel">Precision:</label>
+    <select id="precision">
+    <option value="fp32">FP32</option>
+    <option value="fp64">FP64</option>
+    </select>
     <button id="runBtn"></button>
   </div>
   <div id="summary"></div>
@@ -38,14 +37,15 @@
 <script type="module">
   const DEBUG = true;
   const UBO_SIZE = 256; // UBO は 256B アライン
-  let currentLang = 'ja';
+  let currentLang = 'en';
 
   const translations = {
     ja: {
       pageTitle: 'WebGPU 量子シミュレータ',
       mainTitle: 'WebGPU 量子シミュレータ',
       langLabel: 'Language:',
-      numQubitsLabel: '量子ビット数 <code>num_qubits</code>：',
+      numQubitsLabel: '量子ビット数:',
+      precisionLabel: '精度:',
       runBtn: '実行',
       notSupported: 'このブラウザは WebGPU をサポートしていません。Chrome/Edge 125+ などでお試しください。',
       adapterError: 'GPU adapter を取得できませんでした。',
@@ -66,7 +66,8 @@
       pageTitle: 'WebGPU Quantum Simulator',
       mainTitle: 'WebGPU Quantum Simulator',
       langLabel: 'Language:',
-      numQubitsLabel: 'Number of qubits <code>num_qubits</code>:',
+      numQubitsLabel: 'Number of qubits:',
+      precisionLabel: 'Precision:',
       runBtn: 'Run',
       notSupported: 'This browser does not support WebGPU. Please try Chrome/Edge 125+.',
       fp64NotSupportedError: "This device does not support fp64.",
@@ -87,11 +88,13 @@
 
   function setLanguage(lang) {
     currentLang = lang;
+    document.getElementById("langSelect").value = lang;
     const t = translations[lang];
     document.title = t.pageTitle;
     document.getElementById('mainTitle').textContent = t.mainTitle;
     document.getElementById('langLabel').textContent = t.langLabel;
     document.getElementById('numLabel').innerHTML = t.numQubitsLabel;
+    document.getElementById('precisionLabel').innerHTML = t.precisionLabel;
     document.getElementById('runBtn').textContent = t.runBtn;
     document.getElementById('summary').textContent = '';
     document.getElementById('output').textContent = '';
@@ -516,7 +519,11 @@ const singlePipe = device.createComputePipeline({
   document.getElementById("langSelect").addEventListener("change", (e) => {
     setLanguage(e.target.value);
   });
-  setLanguage('en');
+  if (navigator.language == "ja") {
+    setLanguage('ja');
+  } else {
+    setLanguage('en');
+  }
 document.getElementById("runBtn").addEventListener("click", async () => {
   const n = parseInt(document.getElementById("numQubits").value, 10);
   const precision = document.getElementById("precision").value;
