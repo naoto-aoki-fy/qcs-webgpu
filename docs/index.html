@@ -38,8 +38,10 @@
     <button id="runBtn"></button>
   </div>
   <div id="summary"></div>
+  <canvas id="runtimeChart"></canvas>
   <pre id="output"></pre>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script type="module">
   const DEBUG = true;
   const UBO_SIZE = 256; // UBO は 256B アライン
@@ -53,6 +55,8 @@
       numQubitsLabel: '量子ビット数:',
       precisionLabel: '精度:',
       runBtn: '実行',
+      chartXLabel: '量子ビット数',
+      chartYLabel: '処理時間 (ms)',
       notSupported: 'このブラウザは WebGPU をサポートしていません。Chrome/Edge 125+ などでお試しください。',
       adapterError: 'GPU adapter を取得できませんでした。',
       fp64NotSupportedError: "このデバイスは fp64 をサポートしていません。",
@@ -74,6 +78,8 @@
       numQubitsLabel: 'Number of qubits:',
       precisionLabel: 'Precision:',
       runBtn: 'Run',
+      chartXLabel: 'Number of qubits',
+      chartYLabel: 'Runtime (ms)',
       notSupported: 'This browser does not support WebGPU. Please try Chrome/Edge 125+.',
       fp64NotSupportedError: "This device does not support fp64.",
       adapterError: 'Failed to get GPU adapter.',
@@ -90,6 +96,28 @@
     }
   };
 
+  let runtimeChart;
+
+  function initChart(t) {
+    const ctx = document.getElementById('runtimeChart');
+    runtimeChart = new Chart(ctx, {
+      type: 'scatter',
+      data: { datasets: [{ label: 'Runtime', data: [] }] },
+      options: {
+        scales: {
+          x: { title: { display: true, text: t.chartXLabel }, type: 'linear' },
+          y: { title: { display: true, text: t.chartYLabel } }
+        }
+      }
+    });
+  }
+
+  function addDataPoint(numQubits, timeMs) {
+    if (!runtimeChart) return;
+    runtimeChart.data.datasets[0].data.push({ x: numQubits, y: timeMs });
+    runtimeChart.update();
+  }
+
   function setLanguage(lang) {
     currentLang = lang;
     document.getElementById("langSelect").value = lang;
@@ -102,6 +130,13 @@
     document.getElementById('runBtn').textContent = t.runBtn;
     document.getElementById('summary').textContent = '';
     document.getElementById('output').textContent = '';
+    if (!runtimeChart) {
+      initChart(t);
+    } else {
+      runtimeChart.options.scales.x.title.text = t.chartXLabel;
+      runtimeChart.options.scales.y.title.text = t.chartYLabel;
+      runtimeChart.update();
+    }
   }
 
 window.addEventListener("error", (e)=>console.error("Window error:", e.error || e.message));
@@ -494,6 +529,7 @@ const singlePipe = device.createComputePipeline({
 
   const INV_SQRT2_STR = (1/Math.sqrt(2)).toFixed(6);
     summary.innerHTML = t.summary(numQubits, Nstates, amp0Re, amp0Im, amp1Re, amp1Im, norm, simElapsedMs, INV_SQRT2_STR);
+    addDataPoint(numQubits, simElapsedMs);
     //  <div class="muted">詳細はコンソール（DevTools）をご確認ください。</div>
 
   const lines = [];
