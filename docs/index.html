@@ -52,12 +52,11 @@
       fp64NotSupportedError: "このデバイスは fp64 をサポートしていません。",
       deviceLimitExceeded: (numQubits, maxQFromBinding) => `num_qubits=${numQubits} はデバイス制限（~${maxQFromBinding}）を超えています。`,
       summary: (n, Nstates, amp0Re, amp0Im, amp1Re, amp1Im, norm, simMs, invSqrt2) =>
-        `<div>n = <b>${n}</b>（状態次元: 2<sup>${n}</sup> = ${Nstates}）</div>
-         <div>⟨0…0|=${amp0Re.toFixed(6)} ${(amp0Im>=0?'+':'−')} ${Math.abs(amp0Im).toFixed(6)}i,
-              ⟨1…1|=${amp1Re.toFixed(6)} ${(amp1Im>=0?'+':'−')} ${Math.abs(amp1Im).toFixed(6)}i
+        `<div>n = <b>${n}</b>（状態数: 2<sup>${n}</sup> = ${Nstates}）</div>
+         <div>⟨0…0|ψ⟩ = ${amp0Re.toFixed(6)} ${(amp0Im>=0?'+':'−')} ${Math.abs(amp0Im).toFixed(6)}i,
+              ⟨1…1|ψ⟩ = ${amp1Re.toFixed(6)} ${(amp1Im>=0?'+':'−')} ${Math.abs(amp1Im).toFixed(6)}i
               （期待 ~ ${invSqrt2}）</div>
-         <div>∥ψ∥² = <b>${norm.toFixed(8)}</b></div>
-         <div>合計処理時間（シミュレーション）: <b>${simMs.toFixed(2)} ms</b></div>`,
+         <div>合計処理時間: <b>${simMs.toFixed(2)} ms</b></div>`,
       vecHeader: '[状態ベクトル（index: re + i·im）]',
       nonzeroHeader: (threshold, count) => `[非ゼロ（しきい値 ${threshold}）: ${count} 個]`,
       omitted: count => `… 省略（合計 ${count} 個）`,
@@ -74,12 +73,11 @@
       adapterError: 'Failed to get GPU adapter.',
       deviceLimitExceeded: (numQubits, maxQFromBinding) => `num_qubits=${numQubits} exceeds device limit (~${maxQFromBinding}).`,
       summary: (n, Nstates, amp0Re, amp0Im, amp1Re, amp1Im, norm, simMs, invSqrt2) =>
-        `<div>n = <b>${n}</b> (state dimension: 2<sup>${n}</sup> = ${Nstates})</div>
-         <div>⟨0…0|=${amp0Re.toFixed(6)} ${(amp0Im>=0?'+':'-')} ${Math.abs(amp0Im).toFixed(6)}i,
-              ⟨1…1|=${amp1Re.toFixed(6)} ${(amp1Im>=0?'+':'-')} ${Math.abs(amp1Im).toFixed(6)}i
+        `<div>n = <b>${n}</b> (number of states: 2<sup>${n}</sup> = ${Nstates})</div>
+         <div>⟨0…0|ψ⟩ = ${amp0Re.toFixed(6)} ${(amp0Im>=0?'+':'-')} ${Math.abs(amp0Im).toFixed(6)}i,
+              ⟨1…1|ψ⟩ = ${amp1Re.toFixed(6)} ${(amp1Im>=0?'+':'-')} ${Math.abs(amp1Im).toFixed(6)}i
               (expected ~ ${invSqrt2})</div>
-         <div>∥ψ∥² = <b>${norm.toFixed(8)}</b></div>
-         <div>Total runtime (simulation): <b>${simMs.toFixed(2)} ms</b></div>`,
+         <div>Total runtime: <b>${simMs.toFixed(2)} ms</b></div>`,
       vecHeader: '[State vector (index: re + i·im)]',
       nonzeroHeader: (threshold, count) => `[Non-zero (threshold ${threshold}): ${count} entries]`,
       omitted: count => `... omitted (total ${count} entries)`,
