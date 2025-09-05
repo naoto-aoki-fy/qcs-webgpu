@@ -2,13 +2,19 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title id="pageTitle">WebGPU Quantum Simulator</title>
   <style>
     body { font-family: system-ui, sans-serif; line-height: 1.5; padding: 16px; }
-    .row { margin-bottom: 12px; }
+    .row { margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     input[type="number"] { width: 6em; }
     pre { background: #f7f7f7; padding: 12px; border-radius: 6px; overflow-x: auto; }
     .muted { color:#666; }
+    @media (max-width: 600px) {
+      body { padding: 12px; }
+      .row { flex-direction: column; align-items: stretch; }
+      input[type="number"], select, button { width: 100%; }
+    }
   </style>
 </head>
   <body>
