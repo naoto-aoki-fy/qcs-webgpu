@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <title>WebGPU: GHZ State (State-Vector Simulator with Debug – fixed)</title>
+  <head>
+    <meta charset="utf-8" />
+    <title id="pageTitle">WebGPU: GHZ State (State-Vector Simulator with Debug – fixed)</title>
   <style>
     body { font-family: system-ui, sans-serif; line-height: 1.5; padding: 16px; }
     .row { margin-bottom: 12px; }
@@ -11,36 +11,99 @@
     .muted { color:#666; }
   </style>
 </head>
-<body>
-  <h1>WebGPU 量子シミュレータ（GHZ 状態・デバッグ出力つき / 修正版）</h1>
-  <div class="row">
-    <label>量子ビット数 <code>num_qubits</code>：
+  <body>
+    <h1 id="mainTitle">WebGPU 量子シミュレータ（GHZ 状態・デバッグ出力つき / 修正版）</h1>
+    <div class="row">
+      <label id="langLabel" for="langSelect">言語:</label>
+      <select id="langSelect">
+        <option value="ja">日本語</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <div class="row">
+      <label id="numLabel" for="numQubits">量子ビット数 <code>num_qubits</code>：</label>
       <input id="numQubits" type="number" min="1" value="3">
-    </label>
-    <button id="runBtn">実行</button>
-  </div>
+      <button id="runBtn">実行</button>
+    </div>
   <div id="summary"></div>
   <pre id="output"></pre>
 
 <script type="module">
-const DEBUG = true;
-const UBO_SIZE = 256; // UBO は 256B アライン
+  const DEBUG = true;
+  const UBO_SIZE = 256; // UBO は 256B アライン
+  let currentLang = 'ja';
+
+  const translations = {
+    ja: {
+      pageTitle: 'WebGPU 量子シミュレータ（GHZ 状態・デバッグ出力つき / 修正版）',
+      mainTitle: 'WebGPU 量子シミュレータ（GHZ 状態・デバッグ出力つき / 修正版）',
+      langLabel: '言語:',
+      numQubitsLabel: '量子ビット数 <code>num_qubits</code>：',
+      runBtn: '実行',
+      notSupported: 'このブラウザは WebGPU をサポートしていません。Chrome/Edge 125+ などでお試しください。',
+      adapterError: 'GPU adapter を取得できませんでした。',
+      deviceLimitExceeded: (numQubits, maxQFromBinding) => `num_qubits=${numQubits} はデバイス制限（~${maxQFromBinding}）を超えています。`,
+      summary: (n, Nstates, amp0Re, amp0Im, amp1Re, amp1Im, norm, simMs, invSqrt2) =>
+        `<div>n = <b>${n}</b>（状態次元: 2<sup>${n}</sup> = ${Nstates}）</div>
+         <div>⟨0…0|=${amp0Re.toFixed(6)} ${(amp0Im>=0?'+':'−')} ${Math.abs(amp0Im).toFixed(6)}i,
+              ⟨1…1|=${amp1Re.toFixed(6)} ${(amp1Im>=0?'+':'−')} ${Math.abs(amp1Im).toFixed(6)}i
+              （期待 ~ ${invSqrt2}）</div>
+         <div>∥ψ∥² = <b>${norm.toFixed(8)}</b></div>
+         <div>合計処理時間（シミュレーション）: <b>${simMs.toFixed(2)} ms</b></div>`,
+      vecHeader: '[状態ベクトル（index: re + i·im）]',
+      nonzeroHeader: (threshold, count) => `[非ゼロ（しきい値 ${threshold}）: ${count} 個]`,
+      omitted: count => `… 省略（合計 ${count} 個）`,
+    },
+    en: {
+      pageTitle: 'WebGPU Quantum Simulator (GHZ State, with Debug Output / fixed)',
+      mainTitle: 'WebGPU Quantum Simulator (GHZ State, with Debug Output / fixed)',
+      langLabel: 'Language:',
+      numQubitsLabel: 'Number of qubits <code>num_qubits</code>:',
+      runBtn: 'Run',
+      notSupported: 'This browser does not support WebGPU. Please try Chrome/Edge 125+.',
+      adapterError: 'Failed to get GPU adapter.',
+      deviceLimitExceeded: (numQubits, maxQFromBinding) => `num_qubits=${numQubits} exceeds device limit (~${maxQFromBinding}).`,
+      summary: (n, Nstates, amp0Re, amp0Im, amp1Re, amp1Im, norm, simMs, invSqrt2) =>
+        `<div>n = <b>${n}</b> (state dimension: 2<sup>${n}</sup> = ${Nstates})</div>
+         <div>⟨0…0|=${amp0Re.toFixed(6)} ${(amp0Im>=0?'+':'-')} ${Math.abs(amp0Im).toFixed(6)}i,
+              ⟨1…1|=${amp1Re.toFixed(6)} ${(amp1Im>=0?'+':'-')} ${Math.abs(amp1Im).toFixed(6)}i
+              (expected ~ ${invSqrt2})</div>
+         <div>∥ψ∥² = <b>${norm.toFixed(8)}</b></div>
+         <div>Total runtime (simulation): <b>${simMs.toFixed(2)} ms</b></div>`,
+      vecHeader: '[State vector (index: re + i·im)]',
+      nonzeroHeader: (threshold, count) => `[Non-zero (threshold ${threshold}): ${count} entries]`,
+      omitted: count => `... omitted (total ${count} entries)`,
+    }
+  };
+
+  function setLanguage(lang) {
+    currentLang = lang;
+    const t = translations[lang];
+    document.title = t.pageTitle;
+    document.getElementById('mainTitle').textContent = t.mainTitle;
+    document.getElementById('langLabel').textContent = t.langLabel;
+    document.getElementById('numLabel').innerHTML = t.numQubitsLabel;
+    document.getElementById('runBtn').textContent = t.runBtn;
+    document.getElementById('summary').textContent = '';
+    document.getElementById('output').textContent = '';
+  }
 
 window.addEventListener("error", (e)=>console.error("Window error:", e.error || e.message));
 
-async function main(numQubits) {
-  const out = document.getElementById("output");
-  const summary = document.getElementById("summary");
-  out.textContent = "";
-  summary.textContent = "";
+  async function main(numQubits) {
+    const out = document.getElementById("output");
+    const summary = document.getElementById("summary");
+    out.textContent = "";
+    summary.textContent = "";
+    const t = translations[currentLang];
 
-  if (!navigator.gpu) {
-    out.textContent = "このブラウザは WebGPU をサポートしていません。Chrome/Edge 125+ などでお試しください。";
-    return;
-  }
+      if (!navigator.gpu) {
+        out.textContent = t.notSupported;
+        return;
+      }
 
   const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter) { out.textContent = "GPU adapter を取得できませんでした。"; return; }
+    if (!adapter) { out.textContent = t.adapterError; return; }
   const device  = await adapter.requestDevice();
   device.onuncapturederror = (e)=>console.error("Uncaptured GPU error:", e.error);
 
@@ -57,9 +120,9 @@ async function main(numQubits) {
   const maxBindBytes = device.limits.maxStorageBufferBindingSize ?? (128 * 1024 * 1024);
   const maxQFromBinding = Math.floor(Math.log2(maxBindBytes / bytesPerAmp));
   if (numQubits > maxQFromBinding) {
-    out.textContent = `num_qubits=${numQubits} はデバイス制限（~${maxQFromBinding}）を超えています。`;
-    return;
-  }
+      out.textContent = t.deviceLimitExceeded(numQubits, maxQFromBinding);
+      return;
+    }
 
   console.groupCollapsed("📐 Config");
   console.table({ numQubits, Nstates, stateBytes, maxStorageBufferBindingSize: maxBindBytes, maxQFromBinding });
@@ -396,18 +459,12 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   const amp1Re = result[lastIdx], amp1Im = result[lastIdx + 1];
 
   const INV_SQRT2_STR = (1/Math.sqrt(2)).toFixed(6);
-  summary.innerHTML =
-    `<div>n = <b>${numQubits}</b>（状態次元: 2<sup>${numQubits}</sup> = ${Nstates}）</div>
-     <div>⟨0…0|=${amp0Re.toFixed(6)} ${(amp0Im>=0?"+":"−")} ${Math.abs(amp0Im).toFixed(6)}i,
-          ⟨1…1|=${amp1Re.toFixed(6)} ${(amp1Im>=0?"+":"−")} ${Math.abs(amp1Im).toFixed(6)}i
-          （期待 ~ ${INV_SQRT2_STR}）</div>
-     <div>∥ψ∥² = <b>${norm.toFixed(8)}</b></div>
-     <div>合計処理時間（シミュレーション）: <b>${simElapsedMs.toFixed(2)} ms</b></div>  <!-- ★ 追加表示 -->`;
+    summary.innerHTML = t.summary(numQubits, Nstates, amp0Re, amp0Im, amp1Re, amp1Im, norm, simElapsedMs, INV_SQRT2_STR);
     //  <div class="muted">詳細はコンソール（DevTools）をご確認ください。</div>
 
   const lines = [];
   if (numQubits <= 12) {
-    lines.push("[状態ベクトル（index: re + i·im）]");
+      lines.push(t.vecHeader);
     for (let i = 0; i < Nstates; i++) {
       lines.push(`${padBin(i, numQubits)} (${i.toString().padStart(4)}) : ` +
                  `${result[2*i].toFixed(6)} + ${result[2*i+1].toFixed(6)}i`);
@@ -419,23 +476,27 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
       const re = result[2*i], im = result[2*i+1];
       if (re*re + im*im > threshold*threshold) nonzeros.push([i, re, im]);
     }
-    lines.push(`[非ゼロ（しきい値 ${threshold}）: ${nonzeros.length} 個]`);
+      lines.push(t.nonzeroHeader(threshold, nonzeros.length));
     for (const [i, re, im] of nonzeros.slice(0, 32)) {
       lines.push(`${padBin(i, numQubits)} (${i}): ${re.toFixed(6)} + ${im.toFixed(6)}i`);
     }
-    if (nonzeros.length > 32) lines.push(`… 省略（合計 ${nonzeros.length} 個）`);
-  }
+      if (nonzeros.length > 32) lines.push(t.omitted(nonzeros.length));
+    }
   out.textContent = lines.join("\n");
 }
 
 /* UI */
-document.getElementById("runBtn").addEventListener("click", async () => {
-  const n = parseInt(document.getElementById("numQubits").value, 10);
-  await main(n);
-});
+  document.getElementById("langSelect").addEventListener("change", (e) => {
+    setLanguage(e.target.value);
+  });
+  document.getElementById("runBtn").addEventListener("click", async () => {
+    const n = parseInt(document.getElementById("numQubits").value, 10);
+    await main(n);
+  });
+  setLanguage('ja');
 
-// ★ 自動実行をやめる（以下の行を削除）
-// main(parseInt(document.getElementById("numQubits").value, 10));
-</script>
-</body>
-</html>
+  // ★ 自動実行をやめる（以下の行を削除）
+  // main(parseInt(document.getElementById("numQubits").value, 10));
+  </script>
+  </body>
+  </html>
