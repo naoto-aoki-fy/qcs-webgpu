@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title id="pageTitle">WebGPU: GHZ State (State-Vector Simulator with Debug – fixed)</title>
+    <title id="pageTitle">WebGPU Quantum Simulator</title>
   <style>
     body { font-family: system-ui, sans-serif; line-height: 1.5; padding: 16px; }
     .row { margin-bottom: 12px; }
@@ -12,16 +12,16 @@
   </style>
 </head>
   <body>
-    <h1 id="mainTitle">WebGPU 量子シミュレータ（GHZ 状態・デバッグ出力つき / 修正版）</h1>
+    <h1 id="mainTitle"></h1>
     <div class="row">
-      <label id="langLabel" for="langSelect">言語:</label>
+      <label id="langLabel" for="langSelect">Language:</label>
       <select id="langSelect">
+        <option value="en" selected>English</option>
         <option value="ja">日本語</option>
-        <option value="en">English</option>
       </select>
     </div>
     <div class="row">
-      <label id="numLabel" for="numQubits">量子ビット数 <code>num_qubits</code>：</label>
+      <label id="numLabel" for="numQubits"></label>
       <input id="numQubits" type="number" min="1" value="3">
     </label>
     <label>精度:
@@ -30,7 +30,7 @@
         <option value="fp64">FP64</option>
       </select>
     </label>
-    <button id="runBtn">実行</button>
+    <button id="runBtn"></button>
   </div>
   <div id="summary"></div>
   <pre id="output"></pre>
@@ -42,9 +42,9 @@
 
   const translations = {
     ja: {
-      pageTitle: 'WebGPU 量子シミュレータ（GHZ 状態・デバッグ出力つき / 修正版）',
-      mainTitle: 'WebGPU 量子シミュレータ（GHZ 状態・デバッグ出力つき / 修正版）',
-      langLabel: '言語:',
+      pageTitle: 'WebGPU 量子シミュレータ',
+      mainTitle: 'WebGPU 量子シミュレータ',
+      langLabel: 'Language:',
       numQubitsLabel: '量子ビット数 <code>num_qubits</code>：',
       runBtn: '実行',
       notSupported: 'このブラウザは WebGPU をサポートしていません。Chrome/Edge 125+ などでお試しください。',
@@ -63,8 +63,8 @@
       omitted: count => `… 省略（合計 ${count} 個）`,
     },
     en: {
-      pageTitle: 'WebGPU Quantum Simulator (GHZ State, with Debug Output / fixed)',
-      mainTitle: 'WebGPU Quantum Simulator (GHZ State, with Debug Output / fixed)',
+      pageTitle: 'WebGPU Quantum Simulator',
+      mainTitle: 'WebGPU Quantum Simulator',
       langLabel: 'Language:',
       numQubitsLabel: 'Number of qubits <code>num_qubits</code>:',
       runBtn: 'Run',
@@ -516,7 +516,7 @@ const singlePipe = device.createComputePipeline({
   document.getElementById("langSelect").addEventListener("change", (e) => {
     setLanguage(e.target.value);
   });
-  setLanguage('ja');
+  setLanguage('en');
 document.getElementById("runBtn").addEventListener("click", async () => {
   const n = parseInt(document.getElementById("numQubits").value, 10);
   const precision = document.getElementById("precision").value;
