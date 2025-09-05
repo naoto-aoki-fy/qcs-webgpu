@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WebGPU: GHZ State (State-Vector Simulator with Debug – fixed)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; line-height: 1.5; padding: 16px; }
+    .row { margin-bottom: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    label { display: inline-flex; align-items: center; gap: 6px; }
+    input[type="number"] { width: 6em; }
+    pre { background: #f7f7f7; padding: 12px; border-radius: 6px; overflow-x: auto; }
+    .muted { color:#666; }
+  </style>
+</head>
+<body>
+  <h1 id="title">WebGPU 量子シミュレータ</h1>
+  <div class="row">
+    <label>
+      <span id="labelQubitsText">量子ビット数 <code>num_qubits</code>：</span>
+      <input id="numQubits" type="number" min="1" value="3">
+    </label>
+
+    <!-- ★ 精度切替 -->
+    <label>
+      <span id="precisionText">精度</span>：
+      <select id="precisionSel">
+        <option value="fp32">fp32（単精度）</option>
+        <option value="fp64">fp64（倍精度）</option>
+      </select>
+    </label>
+
+    <!-- ★ 言語切替 -->
+    <label>
+      <span id="languageText">言語</span>：
+      <select id="langSel">
+        <option value="ja" selected>日本語</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+
+    <button id="runBtn">実行</button>
+  </div>
+
+  <div id="summary"></div>
+  <pre id="output"></pre>
+
+<script type="module">
+const DEBUG = true;
+const UBO_SIZE = 256; // UBO は 256B アライン
+
+// ★ i18n（画面表示＆エラーメッセージ）
+const I18N = {
+  ja: {
+    title: "WebGPU 量子シミュレータ",
+    qubitsLabelHTML: '量子ビット数 <code>num_qubits</code>：',
+    precision: "精度",
+    lang: "言語",
+    run: "実行",
+    unsupported: "このブラウザは WebGPU をサポートしていません。Chrome/Edge 125+ などでお試しください。",
+    noAdapter: "GPU adapter を取得できませんでした。",
+    noF64: "このGPU/ブラウザは fp64（shader-f64）をサポートしていません。fp32 を選択してください。",
+    limitExceeded: (n, maxQ) => `num_qubits=${n} はデバイス制限（~${maxQ}）を超えています。`,
+    stateDim: (n, N) => `n = <b>${n}</b>（状態次元: 2<sup>${n}</sup> = ${N}）`,
+    amps: (a0re,a0im,aNre,aNim,exp) =>
+      `⟨0…0|=${a0re} ${(a0im>=0?"+":"−")} ${Math.abs(a0im)}i, ` +
+      `⟨1…1|=${aNre} ${(aNim>=0?"+":"−")} ${Math.abs(aNim)}i（期待 ~ ${exp}）`,
+    normLabel: "∥ψ∥²",
+    totalTime: "合計処理時間（シミュレーション）",
+    details: "詳細はコンソール（DevTools）をご確認ください。",
+    vecHeader: "[状態ベクトル（index: re + i·im）]",
+    nonzerosHeader: (th, cnt) => `[非ゼロ（しきい値 ${th}）: ${cnt} 個]`,
+  },
+  en: {
+    title: "WebGPU Quantum Simulator",
+    qubitsLabelHTML: 'Number of qubits <code>num_qubits</code>:',
+    precision: "Precision",
+    lang: "Language",
+    run: "Run",
+    unsupported: "This browser doesn't support WebGPU. Please try Chrome/Edge 125+.",
+    noAdapter: "Failed to get GPU adapter.",
+    noF64: "Your GPU/browser doesn't support fp64 (shader-f64). Please select fp32.",
+    limitExceeded: (n, maxQ) => `num_qubits=${n} exceeds device limit (~${maxQ}).`,
+    stateDim: (n, N) => `n = <b>${n}</b> (state dimension: 2<sup>${n}</sup> = ${N})`,
+    amps: (a0re,a0im,aNre,aNim,exp) =>
+      `|0…0⟩=${a0re} ${(a0im>=0?"+":"−")} ${Math.abs(a0im)}i, ` +
+      `|1…1⟩=${aNre} ${(aNim>=0?"+":"−")} ${Math.abs(aNim)}i (expected ~ ${exp})`,
+    normLabel: "‖ψ‖²",
+    totalTime: "Total time (simulation)",
+    details: "See DevTools console for details.",
+    vecHeader: "[State vector (index: re + i·im)]",
+    nonzerosHeader: (th, cnt) => `[Non-zeros (threshold ${th}): ${cnt}]`,
+  }
+};
+
+function applyI18N(lang) {
+  const t = I18N[lang];
+  document.getElementById("title").textContent = t.title;
+  document.getElementById("labelQubitsText").innerHTML = t.qubitsLabelHTML;
+  document.getElementById("precisionText").textContent = t.precision;
+  document.getElementById("languageText").textContent = t.lang;
+  document.getElementById("runBtn").textContent = t.run;
+}
+
+window.addEventListener("error", (e)=>console.error("Window error:", e.error || e.message));
+
+/** ★ precision: "fp32" | "fp64", lang: "ja" | "en" */
+async function main(numQubits, precision, lang) {
+  const out = document.getElementById("output");
+  const summary = document.getElementById("summary");
+  out.textContent = "";
+  summary.textContent = "";
+
+  const t = I18N[lang];
+  const FT = (precision === "fp64") ? "f64" : "f32"; // WGSL scalar
+  const BYTES_PER_SCALAR = (precision === "fp64") ? 8 : 4;
+
+  if (!navigator.gpu) { out.textContent = t.unsupported; return; }
+
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) { out.textContent = t.noAdapter; return; }
+
+  // ★ fp64 サポート確認
+  if (precision === "fp64" && !adapter.features?.has?.("shader-f64")) {
+    out.textContent = t.noF64;
+    return;
+  }
+
+  const device = await adapter.requestDevice(
+    precision === "fp64" ? { requiredFeatures: ["shader-f64"] } : {}
+  );
+  device.onuncapturederror = (e)=>console.error("Uncaptured GPU error:", e.error);
+
+  console.groupCollapsed("🔧 Device Info");
+  console.log("Adapter:", adapter);
+  console.log("Device Limits:", device.limits);
+  console.log("Features:", [...device.features.values()]);
+  console.groupEnd();
+
+  const Nstates = 2 ** numQubits;
+  const bytesPerAmp = BYTES_PER_SCALAR * 2; // complex
+  const stateBytes  = Nstates * bytesPerAmp;
+
+  const maxBindBytes = device.limits.maxStorageBufferBindingSize ?? (128 * 1024 * 1024);
+  const maxQFromBinding = Math.floor(Math.log2(maxBindBytes / bytesPerAmp));
+  if (numQubits > maxQFromBinding) {
+    out.textContent = t.limitExceeded(numQubits, maxQFromBinding);
+    return;
+  }
+
+  console.groupCollapsed("📐 Config");
+  console.table({ numQubits, Nstates, stateBytes, maxStorageBufferBindingSize: maxBindBytes, maxQFromBinding, precision });
+  console.groupEnd();
+
+  const WG_SIZE = Math.min(256, device.limits.maxComputeInvocationsPerWorkgroup);
+  const numPairs = Nstates >>> 1;
+  const numWorkgroups = Math.ceil(numPairs / WG_SIZE);
+
+  console.groupCollapsed("🧵 Workgroups");
+  console.table({ WG_SIZE, numPairs, numWorkgroups });
+  console.groupEnd();
+
+  // --- 状態ベクトル（ping-pong） ---
+  const stateA = device.createBuffer({
+    size: stateBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    mappedAtCreation: true
+  });
+  // 初期 |0…0⟩
+  if (precision === "fp64") {
+    const m = new Float64Array(stateA.getMappedRange());
+    // すべて 0、実部の先頭だけ 1
+    m.fill(0); m[0] = 1.0;
+  } else {
+    const m = new Float32Array(stateA.getMappedRange());
+    m.fill(0); m[0] = 1.0;
+  }
+  stateA.unmap();
+
+  const stateB = device.createBuffer({
+    size: stateBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+  });
+
+  const readback = device.createBuffer({
+    size: stateBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+  });
+
+  // --- WGSL を精度に合わせて生成 ---
+  const { singleQubitWGSL, cnotWGSL } = makeShaders(FT, /*useVec4ForF32*/ precision==="fp32", WG_SIZE);
+
+  const singlePipe = device.createComputePipeline({
+    layout: "auto", compute: { module: device.createShaderModule({ code: singleQubitWGSL }), entryPoint: "main" }
+  });
+  const cnotPipe = device.createComputePipeline({
+    layout: "auto", compute: { module: device.createShaderModule({ code: cnotWGSL }), entryPoint: "main" }
+  });
+
+  // --- UBO helpers ---
+  function createUBOWithData(arrayBuffer) {
+    const ubo = device.createBuffer({
+      size: UBO_SIZE,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(ubo, 0, arrayBuffer);
+    return ubo;
+  }
+
+  function buildSingleUBOData(target, N, mat) {
+    // ヘッダ(u32×4 = 16B) + a,b,c,d
+    const buf = new ArrayBuffer(UBO_SIZE);
+    const dv  = new DataView(buf);
+    const stride = 1 << target;
+    const npairs = N >>> 1;
+
+    dv.setUint32(0,  stride, true);
+    dv.setUint32(4,  npairs, true);
+    dv.setUint32(8,  0, true);
+    dv.setUint32(12, 0, true);
+
+    // ★ fp32: vec4<f32> (re,im,0,0) 各16B、fp64: vec2<f64> 各16B → どちらも 16B ステップで書ける
+    let off = 16;
+    if (precision === "fp32") {
+      for (const key of ["a","b","c","d"]) {
+        dv.setFloat32(off+0,  mat[key][0], true); // re
+        dv.setFloat32(off+4,  mat[key][1], true); // im
+        dv.setFloat32(off+8,  0.0, true);        // pad
+        dv.setFloat32(off+12, 0.0, true);        // pad
+        off += 16;
+      }
+    } else {
+      for (const key of ["a","b","c","d"]) {
+        dv.setFloat64(off+0,  mat[key][0], true); // re
+        dv.setFloat64(off+8,  mat[key][1], true); // im
+        off += 16;
+      }
+    }
+    return { buf, stride, npairs };
+  }
+
+  function buildCNOTUBOData(control, target, N) {
+    const buf = new ArrayBuffer(UBO_SIZE);
+    const dv  = new DataView(buf);
+    const stride = 1 << target;
+    const npairs = N >>> 1;
+    const controlMask = 1 << control;
+
+    dv.setUint32(0,  stride, true);
+    dv.setUint32(4,  npairs, true);
+    dv.setUint32(8,  controlMask, true);
+    dv.setUint32(12, 0, true);
+
+    return { buf, stride, npairs, controlMask };
+  }
+
+  // --- ダンプ（常に「計算結果バッファ」を渡す） ---
+  async function dumpState(srcBuf, label, maxShow = 8) {
+    const enc = device.createCommandEncoder();
+    enc.copyBufferToBuffer(srcBuf, 0, readback, 0, stateBytes);
+    device.queue.submit([enc.finish()]);
+    await device.queue.onSubmittedWorkDone();
+
+    await readback.mapAsync(GPUMapMode.READ);
+    let arr;
+    if (precision === "fp64") {
+      arr = new Float64Array(readback.getMappedRange()).slice();
+    } else {
+      arr = new Float32Array(readback.getMappedRange()).slice();
+    }
+    readback.unmap();
+
+    let norm = 0, nonzero = 0;
+    for (let i = 0; i < arr.length; i += 2) {
+      const re = arr[i], im = arr[i+1];
+      const p = re*re + im*im;
+      norm += p;
+      if (p > 1e-7) nonzero++;
+    }
+    const amp0 = [arr[0], arr[1]];
+    const lastIdx = (Nstates - 1) * 2;
+    const amp1 = [arr[lastIdx], arr[lastIdx + 1]];
+
+    console.groupCollapsed(`🧪 ${label}`);
+    console.log(`|0…0⟩ amp: ${fmtC(amp0[0], amp0[1])}, |1…1⟩ amp: ${fmtC(amp1[0], amp1[1])}`);
+    console.log(`norm: ${norm.toFixed(8)}, nonzero amplitudes: ${nonzero}`);
+    const preview = [];
+    for (let i = 0; i < Math.min(Nstates, maxShow); i++) {
+      preview.push({ i, re: arr[2*i].toFixed(6), im: arr[2*i+1].toFixed(6) });
+    }
+    console.table(preview);
+    console.groupEnd();
+
+    return arr;
+  }
+  function fmtC(re, im) { const s = im>=0?"+":"−"; return `${re.toFixed(6)} ${s} ${Math.abs(im).toFixed(6)}i`; }
+
+  (function logPairMappingSample() {
+    const t = 0, s = 1 << t;
+    const preview = [];
+    for (let k = 0; k < Math.min(8, numPairs); k++) {
+      const block = Math.floor(k / s) * (2 * s);
+      const i0 = block + (k % s);
+      const i1 = i0 + s;
+      preview.push({ k, i0, i1 });
+    }
+    console.groupCollapsed("🔎 Pair mapping sample (target=0)");
+    console.table(preview);
+    console.groupEnd();
+  })();
+
+  let bufIn  = stateA;
+  let bufOut = stateB;
+
+  const INV_SQRT2 = 1/Math.sqrt(2);
+  const H = { a:[+INV_SQRT2,0], b:[+INV_SQRT2,0], c:[+INV_SQRT2,0], d:[-INV_SQRT2,0] };
+
+  // ★ 合計処理時間（シミュレーション区間）
+  const simT0 = performance.now();
+  console.time("⏱️ Simulation total");
+
+  // --- H on qubit 0 ---
+  {
+    console.time("H gate");
+    const { buf: uboData, stride, npairs } = buildSingleUBOData(0, Nstates, H);
+    const ubo = createUBOWithData(uboData);
+
+    device.pushErrorScope("validation");
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(singlePipe);
+    const bind = device.createBindGroup({
+      layout: singlePipe.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: bufIn  } },
+        { binding: 1, resource: { buffer: bufOut } },
+        { binding: 2, resource: { buffer: ubo    } },
+      ]
+    });
+    pass.setBindGroup(0, bind);
+    pass.dispatchWorkgroups(numWorkgroups);
+    pass.end();
+    device.queue.submit([enc.finish()]);
+    const err = await device.popErrorScope();
+    if (err) console.error("Validation error (H):", err);
+    await device.queue.onSubmittedWorkDone();
+
+    if (DEBUG) await dumpState(bufOut, "After H");
+    console.timeEnd("H gate");
+    [bufIn, bufOut] = [bufOut, bufIn];
+  }
+
+  // --- CNOT(0→i), i=1..n-1 ---
+  for (let tIdx = 1; tIdx < numQubits; tIdx++) {
+    console.time(`CNOT 0→${tIdx}`);
+    const { buf: uboData } = buildCNOTUBOData(0, tIdx, Nstates);
+    const ubo = createUBOWithData(uboData);
+
+    device.pushErrorScope("validation");
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(cnotPipe);
+    const bind = device.createBindGroup({
+      layout: cnotPipe.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: bufIn  } },
+        { binding: 1, resource: { buffer: bufOut } },
+        { binding: 2, resource: { buffer: ubo    } },
+      ]
+    });
+    pass.setBindGroup(0, bind);
+    pass.dispatchWorkgroups(numWorkgroups);
+    pass.end();
+    device.queue.submit([enc.finish()]);
+    const err = await device.popErrorScope();
+    if (err) console.error(`Validation error (CNOT 0→${tIdx}):`, err);
+    await device.queue.onSubmittedWorkDone();
+
+    if (DEBUG) await dumpState(bufOut, `After CNOT 0→${tIdx}`);
+    console.timeEnd(`CNOT 0→${tIdx}`);
+    [bufIn, bufOut] = [bufOut, bufIn];
+  }
+
+  console.timeEnd("⏱️ Simulation total");
+  const simElapsedMs = performance.now() - simT0;
+
+  // --- Final readback to page ---
+  {
+    const enc = device.createCommandEncoder();
+    enc.copyBufferToBuffer(bufIn, 0, readback, 0, stateBytes);
+    device.queue.submit([enc.finish()]);
+    await device.queue.onSubmittedWorkDone();
+    await readback.mapAsync(GPUMapMode.READ);
+  }
+
+  let result;
+  if (precision === "fp64") {
+    result = new Float64Array(readback.getMappedRange()).slice();
+  } else {
+    result = new Float32Array(readback.getMappedRange()).slice();
+  }
+  readback.unmap();
+
+  let norm = 0;
+  for (let i = 0; i < result.length; i += 2) {
+    const re = result[i], im = result[i+1];
+    norm += re*re + im*im;
+  }
+  const amp0Re = result[0], amp0Im = result[1];
+  const lastIdx = (Nstates - 1) * 2;
+  const amp1Re = result[lastIdx], amp1Im = result[lastIdx + 1];
+
+  const INV_SQRT2_STR = (1/Math.sqrt(2)).toFixed(6);
+  const ampLine = I18N[lang].amps(
+    amp0Re.toFixed(6), amp0Im.toFixed(6),
+    amp1Re.toFixed(6), amp1Im.toFixed(6),
+    INV_SQRT2_STR
+  );
+
+  summary.innerHTML =
+    `<div>${I18N[lang].stateDim(numQubits, Nstates)}</div>
+     <div>${ampLine}</div>
+     <div>${I18N[lang].normLabel} = <b>${norm.toFixed(8)}</b></div>
+     <div>${I18N[lang].totalTime}: <b>${simElapsedMs.toFixed(2)} ms</b></div>
+     <div class="muted">${I18N[lang].details}</div>`;
+
+  const lines = [];
+  if (numQubits <= 12) {
+    lines.push(I18N[lang].vecHeader);
+    for (let i = 0; i < Nstates; i++) {
+      lines.push(`${i.toString().padStart(4)} : ${result[2*i].toFixed(6)} + ${result[2*i+1].toFixed(6)}i`);
+    }
+  } else {
+    const threshold = 1e-5;
+    const nonzeros = [];
+    for (let i = 0; i < Nstates; i++) {
+      const re = result[2*i], im = result[2*i+1];
+      if (re*re + im*im > threshold*threshold) nonzeros.push([i, re, im]);
+    }
+    lines.push(I18N[lang].nonzerosHeader(threshold, nonzeros.length));
+    for (const [i, re, im] of nonzeros.slice(0, 32)) {
+      lines.push(`${i}: ${re.toFixed(6)} + ${im.toFixed(6)}i`);
+    }
+    if (nonzeros.length > 32) lines.push(`… (${nonzeros.length - 32} more)`);
+  }
+  out.textContent = lines.join("\n");
+}
+
+/* --- WGSL generator（★ 精度ごとに型を切替） --- */
+function makeShaders(FT, useVec4ForF32, WG_SIZE) {
+  const GateVecT = (FT === "f32" && useVec4ForF32) ? "vec4<f32>" : `vec2<${FT}>`;
+  const singleQubitWGSL = /* wgsl */`
+struct GateU {
+  stride : u32,   // 2^target
+  npairs : u32,   // N/2
+  _pad0  : u32,
+  _pad1  : u32,
+  a : ${GateVecT}, // [re,im,(0,0) when f32/vec4]
+  b : ${GateVecT},
+  c : ${GateVecT},
+  d : ${GateVecT},
+};
+
+struct Buf { data: array<${FT}>; };
+
+@group(0) @binding(0) var<storage, read>       stateIn  : Buf;
+@group(0) @binding(1) var<storage, read_write> stateOut : Buf;
+@group(0) @binding(2) var<uniform>             U       : GateU;
+
+fn cmul(x: vec2<${FT}>, y: vec2<${FT}>) -> vec2<${FT}> {
+  return vec2<${FT}>(x.x*y.x - x.y*y.y, x.x*y.y + x.y*x.x);
+}
+
+@compute @workgroup_size(${WG_SIZE})
+fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+  let k = gid.x;
+  if (k >= U.npairs) { return; }
+
+  let s = U.stride;
+  let block = (k / s) * (2u * s);
+  let i0    = block + (k % s);
+  let i1    = i0 + s;
+
+  let f0 = i0 * 2u;
+  let f1 = i1 * 2u;
+
+  let v0 = vec2<${FT}>(stateIn.data[f0],    stateIn.data[f0+1u]);
+  let v1 = vec2<${FT}>(stateIn.data[f1],    stateIn.data[f1+1u]);
+
+  let a = U.a.xy;
+  let b = U.b.xy;
+  let c = U.c.xy;
+  let d = U.d.xy;
+
+  let o0 = cmul(a, v0) + cmul(b, v1);
+  let o1 = cmul(c, v0) + cmul(d, v1);
+
+  stateOut.data[f0]    = o0.x;
+  stateOut.data[f0+1u] = o0.y;
+  stateOut.data[f1]    = o1.x;
+  stateOut.data[f1+1u] = o1.y;
+}
+`;
+
+  const cnotWGSL = /* wgsl */`
+struct CNOTU {
+  stride      : u32, // 2^target
+  npairs      : u32, // N/2
+  controlMask : u32, // 2^control
+  _pad        : u32,
+};
+
+struct Buf { data: array<${FT}>; };
+
+@group(0) @binding(0) var<storage, read>       stateIn  : Buf;
+@group(0) @binding(1) var<storage, read_write> stateOut : Buf;
+@group(0) @binding(2) var<uniform>             U       : CNOTU;
+
+@compute @workgroup_size(${WG_SIZE})
+fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+  let k = gid.x;
+  if (k >= U.npairs) { return; }
+
+  let s = U.stride;
+  let block = (k / s) * (2u * s);
+  let i0    = block + (k % s);
+  let i1    = i0 + s;
+
+  let f0 = i0 * 2u;
+  let f1 = i1 * 2u;
+
+  if ((i0 & U.controlMask) != 0u) {
+    // swap
+    stateOut.data[f0]    = stateIn.data[f1];
+    stateOut.data[f0+1u] = stateIn.data[f1+1u];
+    stateOut.data[f1]    = stateIn.data[f0];
+    stateOut.data[f1+1u] = stateIn.data[f0+1u];
+  } else {
+    // copy
+    stateOut.data[f0]    = stateIn.data[f0];
+    stateOut.data[f0+1u] = stateIn.data[f0+1u];
+    stateOut.data[f1]    = stateIn.data[f1];
+    stateOut.data[f1+1u] = stateIn.data[f1+1u];
+  }
+}
+`;
+  return { singleQubitWGSL, cnotWGSL };
+}
+
+/* UI */
+const runBtn = document.getElementById("runBtn");
+runBtn.addEventListener("click", async () => {
+  const n = parseInt(document.getElementById("numQubits").value, 10);
+  const precision = document.getElementById("precisionSel").value; // "fp32" | "fp64"
+  const lang = document.getElementById("langSel").value;           // "ja" | "en"
+  await main(n, precision, lang);
+});
+
+// 言語切替：ラベルを即時更新
+document.getElementById("langSel").addEventListener("change", (e)=>{
+  applyI18N(e.target.value);
+});
+
+// ★ 初期言語のラベル適用（自動実行はしない）
+applyI18N(document.getElementById("langSel").value);
+
+// ★ 自動実行はしない（呼び出し無し）
+</script>
+</body>
+</html>
