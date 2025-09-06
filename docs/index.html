@@ -41,7 +41,6 @@
     .muted { color:#aaa; }
     @media (max-width: 600px) {
       body { padding: 12px; }
-      .row { flex-direction: column; align-items: flex-start; }
       input[type="number"] { width: 6ch; }
       select, button { width: fit-content; }
     }
@@ -59,7 +58,6 @@
     <div class="row">
       <label id="numLabel" for="numQubits"></label>
       <input id="numQubits" type="number" min="1" value="3">
-    </label>
     <label id="precisionLabel">Precision:</label>
     <select id="precision">
     <option value="fp32">FP32</option>
