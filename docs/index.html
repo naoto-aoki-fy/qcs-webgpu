@@ -65,6 +65,7 @@
     </select>
     <button id="runBtn"></button>
   </div>
+  <div id="precisionMsg" class="muted"></div>
   <div id="summary"></div>
   <canvas id="runtimeChart"></canvas>
   <pre id="output"></pre>
@@ -177,6 +178,7 @@
     document.getElementById('runBtn').textContent = t.runBtn;
     document.getElementById('summary').textContent = '';
     document.getElementById('output').textContent = '';
+    document.getElementById('precisionMsg').textContent = '';
     if (!runtimeChart) {
       initChart(t);
     } else {
@@ -611,11 +613,34 @@ const singlePipe = device.createComputePipeline({
   } else {
     setLanguage('en');
   }
-document.getElementById("runBtn").addEventListener("click", async () => {
-  const n = parseInt(document.getElementById("numQubits").value, 10);
-  const precision = document.getElementById("precision").value;
-  await main(n, precision);
-});
+  document.getElementById("precision").addEventListener("change", async (e) => {
+    const msg = document.getElementById("precisionMsg");
+    msg.textContent = "";
+    if (e.target.value !== "fp64") return;
+    const t = translations[currentLang];
+    if (!navigator.gpu) {
+      msg.textContent = t.notSupported;
+      e.target.value = "fp32";
+      return;
+    }
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) {
+      msg.textContent = t.adapterError;
+      e.target.value = "fp32";
+      return;
+    }
+    if (!adapter.features.has("shader-f64")) {
+      msg.textContent = t.fp64NotSupportedError;
+      e.target.value = "fp32";
+      return;
+    }
+  });
+  document.getElementById("runBtn").addEventListener("click", async () => {
+    document.getElementById("precisionMsg").textContent = "";
+    const n = parseInt(document.getElementById("numQubits").value, 10);
+    const precision = document.getElementById("precision").value;
+    await main(n, precision);
+  });
 
   // ★ 自動実行をやめる（以下の行を削除）
   // main(parseInt(document.getElementById("numQubits").value, 10));
