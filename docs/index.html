@@ -44,6 +44,24 @@
       input[type="number"] { width: 6ch; }
       select, button { width: fit-content; }
     }
+:root{
+  --link-color: #90c7ff;
+  --link-visited-color: #916af5;
+  --link-hover-color: #5094dc;
+}
+
+/* Control only the color (and underline color) for links */
+a {
+  color: var(--link-color);
+  /* When an underline is present, match its color to the link color (separate from the browser’s default underline color) */
+  text-decoration-color: currentColor;
+}
+
+/* For state-specific styles (visited / hover / focus / active), control only the color */
+a:visited { color: var(--link-visited-color); }
+a:hover   { color: var(--link-hover-color); }
+a:active  { color: var(--link-hover-color); }
+a:focus   { color: var(--link-hover-color); outline-color: var(--link-hover-color); }
   </style>
 </head>
   <body>
@@ -128,7 +146,7 @@ import { getWGSL, buildSingleUBOData, buildCNOTUBOData, createUBOWithData } from
       running: '計算中...',
       chartXLabel: '量子ビット数',
       chartYLabel: '処理時間 (ms)',
-      notSupported: 'このブラウザは WebGPU をサポートしていません。Chrome/Edge 125+ などでお試しください。',
+      notSupported: 'WebGPUが無効です。<br />参考: <a href="enable_webgpu_iphone.html">iPhone WebGPUを有効化</a>',
       adapterError: 'GPU adapter を取得できませんでした。',
       fp64NotSupportedError: "このデバイスは fp64 をサポートしていません。",
       deviceLimitExceeded: (numQubits, maxQFromBinding) => `num_qubits=${numQubits} はデバイス制限（~${maxQFromBinding}）を超えています。`,
@@ -152,7 +170,7 @@ import { getWGSL, buildSingleUBOData, buildCNOTUBOData, createUBOWithData } from
       running: 'Calculating...',
       chartXLabel: 'Number of qubits',
       chartYLabel: 'Runtime (ms)',
-      notSupported: 'This browser does not support WebGPU. Please try Chrome/Edge 125+.',
+      notSupported: 'WebGPU is disabled.<br />FYI: <a href="enable_webgpu_iphone.html">Enable WebGPU on iPhone</a>',
       fp64NotSupportedError: "This device does not support fp64.",
       adapterError: 'Failed to get GPU adapter.',
       deviceLimitExceeded: (numQubits, maxQFromBinding) => `num_qubits=${numQubits} exceeds device limit (~${maxQFromBinding}).`,
@@ -278,7 +296,7 @@ window.addEventListener("error", (e)=>console.error("Window error:", e.error || 
     const is64 = (precision === "fp64");
     const floatArray = is64 ? Float64Array : Float32Array;
       if (!navigator.gpu) {
-        out.textContent = t.notSupported;
+        out.innerHTML = t.notSupported;
         return;
       }
 
@@ -542,7 +560,7 @@ window.addEventListener("error", (e)=>console.error("Window error:", e.error || 
     if (e.target.value === "fp64") {
       const t = translations[currentLang];
       if (!navigator.gpu) {
-        msg.textContent = t.notSupported;
+        msg.innerHTML = t.notSupported;
         e.target.value = "fp32";
       } else {
         const adapter = await navigator.gpu.requestAdapter();

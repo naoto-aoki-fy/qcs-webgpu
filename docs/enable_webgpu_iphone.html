@@ -1,0 +1,56 @@
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Enable WebGPU on iPhone / iPhone WebGPUを有効化</title>
+<script>
+window.addEventListener("load", function (event) {
+    if (navigator.language == "ja") {
+        // location.hash = "japanese";
+        document.getElementById("japanese").scrollIntoView({behavior: "smooth"});
+    }
+    // [].forEach((value, index, array)
+    Array.from(document.getElementByName("link-japanese")).forEach(function (element, index, array) {
+        element.addEventListener("click", function (event) {
+            console.log("link-japanese");
+            document.getElementById("japanese").scrollIntoView({behavior: "smooth"});
+            event.preventDefault();
+        }); 
+    });
+
+    Array.from(document.getElementByName("link-english")).forEach(function (element, index, array) {
+        element.addEventListener("click", function (event) {
+            console.log("link-english");
+            document.getElementById("english").scrollIntoView({behavior: "smooth"});
+            event.preventDefault();
+        }); 
+    });
+}); 
+</script>
+</head>
+<body>
+<a href="#english" name="link-english">English</a>
+<a href="#japanese" name="link-japanese">日本語</a>
+
+<h1 id="english">Enable WebGPU on iPhone</h1>
+<img src="img/IMG_2401.png" /><br />
+<img src="img/IMG_2402.png" /><br />
+<img src="img/IMG_2403.png" /><br />
+<img src="img/IMG_2404.png" /><br />
+<img src="img/IMG_2405.png" /><br />
+
+<a href="#english" name="link-english">English</a>
+<a href="#japanese" name="link-japanese">日本語</a>
+
+<h1 id="japanese">iPhone WebGPUを有効化</h1>
+<img src="img/IMG_2406.png" /><br />
+<img src="img/IMG_2407.png" /><br />
+<img src="img/IMG_2408.png" /><br />
+<img src="img/IMG_2409.png" /><br />
+<img src="img/IMG_2410.png" /><br />
+
+<a href="#english" name="link-english">English</a>
+<a href="#japanese" name="link-japanese">日本語</a>
+
+</body>
+</html>
+
