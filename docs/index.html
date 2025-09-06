@@ -112,8 +112,8 @@ function detectViewMode() {
 }
 </script>
 <script type="module">
+import { getWGSL, buildSingleUBOData, buildCNOTUBOData, createUBOWithData } from './ghz-lib.js';
   const DEBUG = true;
-  const UBO_SIZE = 256; // UBO is 256B aligned
   let currentLang = 'en';
   const isMobile = !detectViewMode().likelyRequestedDesktop;
 
@@ -336,168 +336,13 @@ window.addEventListener("error", (e)=>console.error("Window error:", e.error || 
     size: stateBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
   });
 
-    // --- WGSL (supports FP32/FP64 switching) ---
-  const scalar = is64 ? "f64" : "f32";
-  const complexField = is64 ? `vec2<${scalar}>` : `vec4<${scalar}>`;
-  const access = is64 ? "" : ".xy";
-
-  const singleQubitWGSL = /* wgsl */`
-struct GateU {
-  stride : u32,   // 2^target
-  npairs : u32,   // N/2
-  _pad0  : u32,
-  _pad1  : u32,
-  a : ${complexField},${is64 ? "" : "  // [re, im, 0, 0]"}
-  b : ${complexField},
-  c : ${complexField},
-  d : ${complexField},
-};
-
-struct Buf { data: array<${scalar}>, };
-
-@group(0) @binding(0) var<storage, read>       stateIn  : Buf;
-@group(0) @binding(1) var<storage, read_write> stateOut : Buf;
-@group(0) @binding(2) var<uniform>             U       : GateU;
-
-fn cmul(x: vec2<${scalar}>, y: vec2<${scalar}>) -> vec2<${scalar}> {
-  return vec2<${scalar}>(x.x*y.x - x.y*y.y, x.x*y.y + x.y*x.x);
-}
-
-@compute @workgroup_size(${WG_SIZE})
-fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
-  let k = gid.x;
-  if (k >= U.npairs) { return; }
-
-  let s = U.stride;
-  let block = (k / s) * (2u * s);
-  let i0    = block + (k % s);
-  let i1    = i0 + s;
-
-  let f0 = i0 * 2u;
-  let f1 = i1 * 2u;
-
-  let v0 = vec2<${scalar}>(stateIn.data[f0],    stateIn.data[f0+1u]);
-  let v1 = vec2<${scalar}>(stateIn.data[f1],    stateIn.data[f1+1u]);
-
-  let a = U.a${access};
-  let b = U.b${access};
-  let c = U.c${access};
-  let d = U.d${access};
-
-  let o0 = cmul(a, v0) + cmul(b, v1);
-  let o1 = cmul(c, v0) + cmul(d, v1);
-
-  stateOut.data[f0]    = o0.x;
-  stateOut.data[f0+1u] = o0.y;
-  stateOut.data[f1]    = o1.x;
-  stateOut.data[f1+1u] = o1.y;
-}
-`;
-
-  const cnotWGSL = /* wgsl */`
-struct CNOTU {
-  stride      : u32, // 2^target
-  npairs      : u32, // N/2
-  controlMask : u32, // 2^control
-  _pad        : u32,
-};
-
-struct Buf { data: array<${scalar}>, };
-
-@group(0) @binding(0) var<storage, read>       stateIn  : Buf;
-@group(0) @binding(1) var<storage, read_write> stateOut : Buf;
-@group(0) @binding(2) var<uniform>             U       : CNOTU;
-
-@compute @workgroup_size(${WG_SIZE})
-fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
-  let k = gid.x;
-  if (k >= U.npairs) { return; }
-
-  let s = U.stride;
-  let block = (k / s) * (2u * s);
-  let i0    = block + (k % s);
-  let i1    = i0 + s;
-
-  let f0 = i0 * 2u;
-  let f1 = i1 * 2u;
-
-  if ((i0 & U.controlMask) != 0u) {
-    // swap
-    stateOut.data[f0]    = stateIn.data[f1];
-    stateOut.data[f0+1u] = stateIn.data[f1+1u];
-    stateOut.data[f1]    = stateIn.data[f0];
-    stateOut.data[f1+1u] = stateIn.data[f0+1u];
-  } else {
-    // copy
-    stateOut.data[f0]    = stateIn.data[f0];
-    stateOut.data[f0+1u] = stateIn.data[f0+1u];
-    stateOut.data[f1]    = stateIn.data[f1];
-    stateOut.data[f1+1u] = stateIn.data[f1+1u];
-  }
-}
-`;
-const singlePipe = device.createComputePipeline({
+    const { single: singleQubitWGSL, cnot: cnotWGSL } = await getWGSL(is64, WG_SIZE);
+  const singlePipe = device.createComputePipeline({
     layout: "auto", compute: { module: device.createShaderModule({ code: singleQubitWGSL }), entryPoint: "main" }
   });
   const cnotPipe = device.createComputePipeline({
     layout: "auto", compute: { module: device.createShaderModule({ code: cnotWGSL }), entryPoint: "main" }
   });
-
-  // --- UBO helpers (FIX: include COPY_DST in usage) ---
-  function createUBOWithData(arrayBuffer) {
-    const ubo = device.createBuffer({
-      size: UBO_SIZE,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(ubo, 0, arrayBuffer);
-    return ubo;
-  }
-
-  function buildSingleUBOData(target, N, mat) {
-    const buf = new ArrayBuffer(UBO_SIZE);
-    const dv  = new DataView(buf);
-    const stride = 1 << target;
-    const npairs = N >>> 1;
-
-    dv.setUint32(0,  stride, true);
-    dv.setUint32(4,  npairs, true);
-    dv.setUint32(8,  0, true);
-    dv.setUint32(12, 0, true);
-
-    if (is64) {
-      const f64 = new Float64Array(buf);
-      let base = 16 / 8;
-      f64[base+0] = mat.a[0]; f64[base+1] = mat.a[1];
-      f64[base+2] = mat.b[0]; f64[base+3] = mat.b[1];
-      f64[base+4] = mat.c[0]; f64[base+5] = mat.c[1];
-      f64[base+6] = mat.d[0]; f64[base+7] = mat.d[1];
-    } else {
-      const f32 = new Float32Array(buf);
-      let base = 16 / 4; // float index
-      // a,b,c,d (re,im in xy / zw=0)
-      f32[base+0]  = mat.a[0]; f32[base+1]  = mat.a[1];
-      f32[base+4]  = mat.b[0]; f32[base+5]  = mat.b[1];
-      f32[base+8]  = mat.c[0]; f32[base+9]  = mat.c[1];
-      f32[base+12] = mat.d[0]; f32[base+13] = mat.d[1];
-    }
-
-    return { buf, stride, npairs };
-  }
-
-  function buildCNOTUBOData(control, target, N) {
-    const buf = new ArrayBuffer(UBO_SIZE);
-    const dv  = new DataView(buf);
-    const stride = 1 << target;
-    const npairs = N >>> 1;
-    const controlMask = 1 << control;
-
-    dv.setUint32(0,  stride, true);
-    dv.setUint32(4,  npairs, true);
-    dv.setUint32(8,  controlMask, true);
-    dv.setUint32(12, 0, true);
-
-    return { buf, stride, npairs, controlMask };
-  }
 
   // --- Dump (FIX: always pass the result buffer) ---
   async function dumpState(srcBuf, label, maxShow = 8) {
@@ -568,7 +413,7 @@ const singlePipe = device.createComputePipeline({
     console.table({ stride, npairs, a:H.a.join(","), b:H.b.join(","), c:H.c.join(","), d:H.d.join(",") });
     console.groupEnd();
 
-    const ubo = createUBOWithData(uboData);
+    const ubo = createUBOWithData(device, uboData);
 
     device.pushErrorScope("validation");
     const enc = device.createCommandEncoder();
@@ -603,7 +448,7 @@ const singlePipe = device.createComputePipeline({
     console.table({ stride, npairs, controlMask });
     console.groupEnd();
 
-    const ubo = createUBOWithData(uboData);
+    const ubo = createUBOWithData(device, uboData);
 
     device.pushErrorScope("validation");
     const enc = device.createCommandEncoder();

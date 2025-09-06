@@ -106,3 +106,21 @@ Uniform buffers need 16-byte alignment. The implementation uses:
   * Reduce `n`.
   * Close other GPU-heavy tabs/apps.
   * Keep DevTools open to see timings (`performance.now()`, console `time`).
+
+## Command-line Demo
+
+A small Node.js script (`cli.js`) uses [@kmamal/gpu](https://github.com/kmamal/gpu) to run the same GHZ experiment outside the browser. Both the CLI and the browser version share the WGSL shader code in [`docs/ghz.wgsl`](docs/ghz.wgsl).
+
+### Install
+
+```sh
+npm install
+```
+
+### Run
+
+```sh
+node cli.js -n 3 --precision fp32
+```
+
+Use `--precision fp64` to enable 64-bit floats (if supported).
