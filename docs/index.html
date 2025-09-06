@@ -125,6 +125,7 @@ import { getWGSL, buildSingleUBOData, buildCNOTUBOData, createUBOWithData } from
       numQubitsLabel: '量子ビット数:',
       precisionLabel: '精度:',
       runBtn: '実行',
+      running: '計算中...',
       chartXLabel: '量子ビット数',
       chartYLabel: '処理時間 (ms)',
       notSupported: 'このブラウザは WebGPU をサポートしていません。Chrome/Edge 125+ などでお試しください。',
@@ -148,6 +149,7 @@ import { getWGSL, buildSingleUBOData, buildCNOTUBOData, createUBOWithData } from
       numQubitsLabel: 'Number of qubits:',
       precisionLabel: 'Precision:',
       runBtn: 'Run',
+      running: 'Calculating...',
       chartXLabel: 'Number of qubits',
       chartYLabel: 'Runtime (ms)',
       notSupported: 'This browser does not support WebGPU. Please try Chrome/Edge 125+.',
@@ -251,6 +253,7 @@ import { getWGSL, buildSingleUBOData, buildCNOTUBOData, createUBOWithData } from
     document.getElementById('numLabel').innerHTML = t.numQubitsLabel;
     document.getElementById('precisionLabel').innerHTML = t.precisionLabel;
     document.getElementById('runBtn').textContent = t.runBtn;
+    document.getElementById('runBtn').disabled = false;
     document.getElementById('summary').textContent = '';
     document.getElementById('output').textContent = '';
     document.getElementById('precisionMsg').textContent = '';
@@ -557,11 +560,20 @@ window.addEventListener("error", (e)=>console.error("Window error:", e.error || 
   if (isMobile) {
     setupMobileQubitSelect();
   }
-  document.getElementById("runBtn").addEventListener("click", async () => {
+  const runBtn = document.getElementById("runBtn");
+  runBtn.addEventListener("click", async () => {
     document.getElementById("precisionMsg").textContent = "";
     const n = parseInt(document.getElementById("numQubits").value, 10);
     const precision = document.getElementById("precision").value;
-    await main(n, precision);
+    const t = translations[currentLang];
+    runBtn.textContent = t.running;
+    runBtn.disabled = true;
+    try {
+      await main(n, precision);
+    } finally {
+      runBtn.textContent = t.runBtn;
+      runBtn.disabled = false;
+    }
   });
 
   // ★ Stop automatic execution (delete the following line)
