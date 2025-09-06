@@ -71,10 +71,56 @@
   <pre id="output"></pre>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// 使い方: const info = detectViewMode(); console.log(info);
+function detectViewMode() {
+  const ua = navigator.userAgent || '';
+  // 簡易 UA ベース判定（古典的）
+  const uaLooksMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+
+  // User-Agent Client Hints（存在すればより信頼）
+  const uaData = navigator.userAgentData || null;
+  const uaCHMobile = (uaData && ('mobile' in uaData)) ? !!uaData.mobile : null;
+  // uaCHMobile === true => ブラウザは「モバイル」と宣言
+  // uaCHMobile === false => ブラウザは「モバイルではない」と宣言（デスクトップ寄り）
+
+  // ビューポート / CSS 幅ベース（任意の閾値、ここでは 767px）
+  const viewportWidth = window.innerWidth;
+  const viewportLooksMobile = window.matchMedia('(max-width: 767px)').matches;
+
+  // タッチの有無（参考値）
+  const hasTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+
+  // 推測ルール（ヒューリスティック）
+  // - UA CH がある場合はそれを優先。
+  // - それが無ければ古典的 UA トークンを使う。
+  // - ただし viewport が狭ければ“実際の表示はモバイル寄り”と判断する。
+  let inferredMobile;
+  if (uaCHMobile !== null) inferredMobile = uaCHMobile;
+  else inferredMobile = uaLooksMobile;
+
+  // 「デスクトップ表示をリクエストしている可能性」を示すシグナル
+  const likelyRequestedDesktop = (
+    (uaCHMobile === false) ||              // CH が明示的にモバイル false
+    (!uaLooksMobile && uaCHMobile === null && !viewportLooksMobile) // UA がデスクトップ寄りで幅も広い
+  );
+
+  return {
+    userAgent: ua,
+    uaLooksMobile,
+    uaClientHintsMobile: uaCHMobile,
+    viewportWidth,
+    viewportLooksMobile,
+    hasTouch,
+    likelyRequestedDesktop
+  };
+}
+</script>
 <script type="module">
   const DEBUG = true;
   const UBO_SIZE = 256; // UBO は 256B アライン
   let currentLang = 'en';
+  const isMobile = !detectViewMode().likelyRequestedDesktop;
 
   const translations = {
     ja: {
@@ -164,6 +210,40 @@
     if (!runtimeChart) return;
     runtimeChart.data.datasets[0].data.push({ x: numQubits, y: timeMs });
     runtimeChart.update();
+  }
+
+  async function updateNumQubitOptions() {
+    const sel = document.getElementById('numQubits');
+    if (!sel || sel.tagName !== 'SELECT') return;
+    sel.innerHTML = '';
+    let maxQ = 10;
+    if (navigator.gpu) {
+      const precision = document.getElementById('precision').value;
+      const is64 = (precision === 'fp64');
+      const bytesPerAmp = is64 ? 16 : 8;
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter) {
+        const device = await adapter.requestDevice(is64 ? { requiredFeatures: ['shader-f64'] } : {});
+        const maxBindBytes = device.limits.maxStorageBufferBindingSize ?? (128 * 1024 * 1024);
+        maxQ = Math.floor(Math.log2(maxBindBytes / bytesPerAmp));
+      }
+    }
+    for (let q = 1; q <= maxQ; q++) {
+      const opt = document.createElement('option');
+      opt.value = q;
+      opt.textContent = q;
+      if (q === 3) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  }
+
+  function setupMobileQubitSelect() {
+    const numInput = document.getElementById('numQubits');
+    if (!numInput) return;
+    const sel = document.createElement('select');
+    sel.id = 'numQubits';
+    numInput.parentNode.replaceChild(sel, numInput);
+    updateNumQubitOptions();
   }
 
   function setLanguage(lang) {
@@ -616,25 +696,27 @@ const singlePipe = device.createComputePipeline({
   document.getElementById("precision").addEventListener("change", async (e) => {
     const msg = document.getElementById("precisionMsg");
     msg.textContent = "";
-    if (e.target.value !== "fp64") return;
-    const t = translations[currentLang];
-    if (!navigator.gpu) {
-      msg.textContent = t.notSupported;
-      e.target.value = "fp32";
-      return;
+    if (e.target.value === "fp64") {
+      const t = translations[currentLang];
+      if (!navigator.gpu) {
+        msg.textContent = t.notSupported;
+        e.target.value = "fp32";
+      } else {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+          msg.textContent = t.adapterError;
+          e.target.value = "fp32";
+        } else if (!adapter.features.has("shader-f64")) {
+          msg.textContent = t.fp64NotSupportedError;
+          e.target.value = "fp32";
+        }
+      }
     }
-    const adapter = await navigator.gpu.requestAdapter();
-    if (!adapter) {
-      msg.textContent = t.adapterError;
-      e.target.value = "fp32";
-      return;
-    }
-    if (!adapter.features.has("shader-f64")) {
-      msg.textContent = t.fp64NotSupportedError;
-      e.target.value = "fp32";
-      return;
-    }
+    if (isMobile) updateNumQubitOptions();
   });
+  if (isMobile) {
+    setupMobileQubitSelect();
+  }
   document.getElementById("runBtn").addEventListener("click", async () => {
     document.getElementById("precisionMsg").textContent = "";
     const n = parseInt(document.getElementById("numQubits").value, 10);
