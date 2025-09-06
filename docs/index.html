@@ -72,37 +72,32 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-// 使い方: const info = detectViewMode(); console.log(info);
+// Usage: const info = detectViewMode(); console.log(info);
 function detectViewMode() {
   const ua = navigator.userAgent || '';
-  // 簡易 UA ベース判定（古典的）
+  // Simple UA-based detection (legacy)
   const uaLooksMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
-
-  // User-Agent Client Hints（存在すればより信頼）
+  // User-Agent Client Hints (more reliable if present)
   const uaData = navigator.userAgentData || null;
   const uaCHMobile = (uaData && ('mobile' in uaData)) ? !!uaData.mobile : null;
-  // uaCHMobile === true => ブラウザは「モバイル」と宣言
-  // uaCHMobile === false => ブラウザは「モバイルではない」と宣言（デスクトップ寄り）
-
-  // ビューポート / CSS 幅ベース（任意の閾値、ここでは 767px）
+  // uaCHMobile === true => browser declares itself "mobile"
+  // uaCHMobile === false => browser declares "not mobile" (desktop-like)
+  // Viewport/CSS width based (threshold 767px here)
   const viewportWidth = window.innerWidth;
   const viewportLooksMobile = window.matchMedia('(max-width: 767px)').matches;
-
-  // タッチの有無（参考値）
+  // Presence of touch support (reference)
   const hasTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
-
-  // 推測ルール（ヒューリスティック）
-  // - UA CH がある場合はそれを優先。
-  // - それが無ければ古典的 UA トークンを使う。
-  // - ただし viewport が狭ければ“実際の表示はモバイル寄り”と判断する。
+  // Inference rules (heuristics)
+  // - Use UA CH if available.
+  // - Otherwise fall back to legacy UA tokens.
+  // - If the viewport is narrow, treat it as mobile-like.
   let inferredMobile;
   if (uaCHMobile !== null) inferredMobile = uaCHMobile;
   else inferredMobile = uaLooksMobile;
-
-  // 「デスクトップ表示をリクエストしている可能性」を示すシグナル
+  // Signal that desktop mode may have been requested
   const likelyRequestedDesktop = (
-    (uaCHMobile === false) ||              // CH が明示的にモバイル false
-    (!uaLooksMobile && uaCHMobile === null && !viewportLooksMobile) // UA がデスクトップ寄りで幅も広い
+    (uaCHMobile === false) ||              // UA CH explicitly reports mobile false
+    (!uaLooksMobile && uaCHMobile === null && !viewportLooksMobile) // UA looks desktop-like and viewport is wide
   );
 
   return {
@@ -118,7 +113,7 @@ function detectViewMode() {
 </script>
 <script type="module">
   const DEBUG = true;
-  const UBO_SIZE = 256; // UBO は 256B アライン
+  const UBO_SIZE = 256; // UBO is 256B aligned
   let currentLang = 'en';
   const isMobile = !detectViewMode().likelyRequestedDesktop;
 
@@ -322,7 +317,7 @@ window.addEventListener("error", (e)=>console.error("Window error:", e.error || 
   console.table({ WG_SIZE, numPairs, numWorkgroups });
   console.groupEnd();
 
-  // --- 状態ベクトル（ping-pong） ---
+  // --- State vector (ping-pong) ---
   const initHost = new floatArray(Nstates * 2);
   initHost[0] = 1.0;
 
@@ -341,7 +336,7 @@ window.addEventListener("error", (e)=>console.error("Window error:", e.error || 
     size: stateBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
   });
 
-    // --- WGSL（FP32/FP64 切り替え対応） ---
+    // --- WGSL (supports FP32/FP64 switching) ---
   const scalar = is64 ? "f64" : "f32";
   const complexField = is64 ? `vec2<${scalar}>` : `vec4<${scalar}>`;
   const access = is64 ? "" : ".xy";
@@ -448,7 +443,7 @@ const singlePipe = device.createComputePipeline({
     layout: "auto", compute: { module: device.createShaderModule({ code: cnotWGSL }), entryPoint: "main" }
   });
 
-  // --- UBO helpers（FIX: usage に COPY_DST を含める） ---
+  // --- UBO helpers (FIX: include COPY_DST in usage) ---
   function createUBOWithData(arrayBuffer) {
     const ubo = device.createBuffer({
       size: UBO_SIZE,
@@ -479,7 +474,7 @@ const singlePipe = device.createComputePipeline({
     } else {
       const f32 = new Float32Array(buf);
       let base = 16 / 4; // float index
-      // a,b,c,d（xy に re,im / zw=0）
+      // a,b,c,d (re,im in xy / zw=0)
       f32[base+0]  = mat.a[0]; f32[base+1]  = mat.a[1];
       f32[base+4]  = mat.b[0]; f32[base+5]  = mat.b[1];
       f32[base+8]  = mat.c[0]; f32[base+9]  = mat.c[1];
@@ -504,7 +499,7 @@ const singlePipe = device.createComputePipeline({
     return { buf, stride, npairs, controlMask };
   }
 
-  // --- ダンプ（FIX: いつも「計算結果バッファ」を渡す） ---
+  // --- Dump (FIX: always pass the result buffer) ---
   async function dumpState(srcBuf, label, maxShow = 8) {
     const enc = device.createCommandEncoder();
     enc.copyBufferToBuffer(srcBuf, 0, readback, 0, stateBytes);
@@ -561,8 +556,8 @@ const singlePipe = device.createComputePipeline({
   const INV_SQRT2 = 1/Math.sqrt(2);
   const H = { a:[+INV_SQRT2,0], b:[+INV_SQRT2,0], c:[+INV_SQRT2,0], d:[-INV_SQRT2,0] };
 
-  // ★ ここからシミュレーション区間の計測を開始
-  const simT0 = performance.now();               // ← 追加
+  // ★ Start timing the simulation section here
+  const simT0 = performance.now();               // ← added
   console.time("⏱️ Simulation total");
 
   // --- H on qubit 0 ---
@@ -595,7 +590,7 @@ const singlePipe = device.createComputePipeline({
     if (err) console.error("Validation error (H):", err);
     await device.queue.onSubmittedWorkDone();
 
-    if (DEBUG) await dumpState(bufOut, "After H"); // ← FIX: 計算結果バッファを渡す
+    if (DEBUG) await dumpState(bufOut, "After H"); // ← FIX: pass the result buffer
     console.timeEnd("H gate");
     [bufIn, bufOut] = [bufOut, bufIn];
   }
@@ -636,7 +631,7 @@ const singlePipe = device.createComputePipeline({
   }
 
   console.timeEnd("⏱️ Simulation total");
-  const simElapsedMs = performance.now() - simT0;   // ★ 合計処理時間（表示用）
+  const simElapsedMs = performance.now() - simT0;   // ★ Total processing time (for display)
 
   // --- Final readback to page ---
   const encFinal = device.createCommandEncoder();
@@ -659,7 +654,7 @@ const singlePipe = device.createComputePipeline({
   const INV_SQRT2_STR = (1/Math.sqrt(2)).toFixed(6);
     summary.innerHTML = t.summary(numQubits, Nstates, amp0Re, amp0Im, amp1Re, amp1Im, norm, simElapsedMs, INV_SQRT2_STR);
     addDataPoint(numQubits, simElapsedMs);
-    //  <div class="muted">詳細はコンソール（DevTools）をご確認ください。</div>
+    //  <div class="muted">Check the console (DevTools) for details.</div>
 
   const lines = [];
   if (numQubits <= 12) {
@@ -724,7 +719,7 @@ const singlePipe = device.createComputePipeline({
     await main(n, precision);
   });
 
-  // ★ 自動実行をやめる（以下の行を削除）
+  // ★ Stop automatic execution (delete the following line)
   // main(parseInt(document.getElementById("numQubits").value, 10));
   </script>
   </body>
